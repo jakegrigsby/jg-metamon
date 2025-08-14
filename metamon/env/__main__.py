@@ -4,10 +4,10 @@ from argparse import ArgumentParser
 from metamon.baselines.heuristic.basic import GymLeader, RandomBaseline
 from metamon.baselines.model_based.bcrnn_baselines import BaseRNN
 from metamon.interface import (
+    get_reward_function,
     get_observation_space,
     TokenizedObservationSpace,
     DefaultActionSpace,
-    DefaultShapedReward,
 )
 from metamon.tokenizer import get_tokenizer
 from metamon.env.wrappers import get_metamon_teams, BattleAgainstBaseline
@@ -19,6 +19,7 @@ if __name__ == "__main__":
     parser.add_argument("--battle_format", type=str, default="gen1ou")
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--team_set", type=str, default="competitive")
+    parser.add_argument("--reward_function", type=str, default="DefaultShapedReward")
     parser.add_argument(
         "--observation_space", type=str, default="DefaultObservationSpace"
     )
@@ -39,7 +40,7 @@ if __name__ == "__main__":
             tokenizer=get_tokenizer("DefaultObservationSpace-v1"),
         ),
         action_space=DefaultActionSpace(),
-        reward_function=DefaultShapedReward(),
+        reward_function=get_reward_function(args.reward_function),
         battle_backend=args.battle_backend,
     )
 

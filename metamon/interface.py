@@ -912,6 +912,44 @@ class DefaultShapedReward(RewardFunction):
 
 
 @register_reward_function()
+class AggressiveShapedReward(RewardFunction):
+
+     def __call__(self, last_state: UniversalState, state: UniversalState) -> float:
+        active_now = state.player_active_pokemon
+        active_prev = None
+        for pokemon in [
+            last_state.player_active_pokemon,
+            *last_state.available_switches,
+        ]:
+            if pokemon.base_species == active_now.base_species:
+                active_prev = pokemon
+                break
+        hp_gain = 0.0 if active_prev is None else active_now.hp_pct - active_prev.hp_pct
+        opp_now = state.opponent_active_pokemon
+        opp_prev = last_state.opponent_active_pokemon
+        if opp_now.base_species == opp_prev.base_species:
+            damage_done = opp_prev.hp_pct - opp_now.hp_pct
+        else:
+            damage_done = 0.0
+        lost_pokemon = float(
+            len(last_state.available_switches) > len(state.available_switches)
+        )
+        removed_pokemon = float(
+            last_state.opponents_remaining > state.opponents_remaining
+        )
+        victory = float(state.battle_won)
+        reward = (
+            1.0 * (damage_done + hp_gain)
+            + 2.0 * (removed_pokemon - lost_pokemon)
+            + 200.0 * victory
+        )
+        return reward
+
+   
+    
+    
+
+@register_reward_function()
 class BinaryReward(RewardFunction):
     """A sparse variant of the default reward function."""
 
@@ -1008,7 +1046,6 @@ class DefaultObservationSpace(ObservationSpace):
     ) -> list[float]:
         if not active:
             return []
-        # notably missing PP, which (for now) is too unreliable across replay parser vs. poke-env vs. actual pokemon showdown
         return [move.base_power / 200.0, move.accuracy, move.priority / 5.0]
 
     def _get_move_pad_numerical(self, active: bool) -> list[float]:
@@ -1031,6 +1068,9 @@ class DefaultObservationSpace(ObservationSpace):
                 out += self._get_move_pad_string(active=False)
                 move_num += 1
         return out
+    
+    def _get_opponent_pokemon_string_features(self, pokemon: UniversalPokemon, active: bool) -> list[str]:
+        return self._get_pokemon_string_features(pokemon, active)
 
     def _get_pokemon_pad_string(self, active: bool) -> list[str]:
         blanks = 3 + (4 if active else 5)
@@ -1092,7 +1132,7 @@ class DefaultObservationSpace(ObservationSpace):
             switch_num += 1
 
         force_switch = "<forcedswitch>" if state.forced_switch else "<anychoice>"
-        opponent_str = ["<opponent>"] + self._get_pokemon_string_features(
+        opponent_str = ["<opponent>"] + self._get_opponent_pokemon_string_features(
             state.opponent_active_pokemon, active=True
         )
         numerical += self._get_pokemon_numerical_features(
@@ -1242,6 +1282,30 @@ class TeamPreviewObservationSpace(ExpandedObservationSpace):
             obs["text"].item() + " " + " ".join(teampreview[:6]), dtype=np.str_
         )
         return obs
+
+@register_observation_space()
+class OpponentMoveObservationSpace(TeamPreviewObservationSpace):
+    """
+    Trades some text tokens to make space for the opponent's revealed moves.
+    """
+
+    def _get_move_string_features(self, move: UniversalMove, active: bool) -> list[str]:
+        out = [clean_name(move.name)]
+        if active:
+            # save 4 tokens
+            out += [clean_name(move.move_type)]
+        return out
+    
+    def _get_move_pad_string(self, active: bool) -> list[str]:
+        return ["<blank>"] * (2 if active else 1)
+    
+    def _get_opponent_pokemon_string_features(self, pokemon: UniversalPokemon, active: bool) -> list[str]:
+        base = self._get_pokemon_string_features(pokemon, active)
+        # add 4 tokens
+        moves = ["<blank>"] * 4
+        for i, move in enumerate(consistent_move_order(pokemon.moves)[:4]):
+            moves[i] = clean_name(move.name)
+        return base + moves
 
 
 class TokenizedObservationSpace(ObservationSpace):

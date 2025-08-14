@@ -165,7 +165,7 @@ class ParsedReplayDataset(Dataset):
                 continue
             for filename in bar(os.listdir(path), desc=f"Finding {format} battles"):
                 if not (filename.endswith(".json") or filename.endswith(".json.lz4")):
-                    print(f"Skipping {filename} because it does not match the criteria")
+                    print(f"Skipping {filename} because it does not match the expected file extension")
                     continue
                 try:
                     (
@@ -218,7 +218,12 @@ class ParsedReplayDataset(Dataset):
         return data
 
     def load_filename(self, filename: str):
-        data = self._load_json(filename)
+        self._most_recent_filename = filename
+        try:
+            data = self._load_json(filename)
+        except Exception as e:
+            print(f"Error loading {filename}")
+            raise e
         states = [UniversalState.from_dict(s) for s in data["states"]]
         # reset the observation space, then call once on each state, which lets
         # any history-dependent features behave as they would in an online battle

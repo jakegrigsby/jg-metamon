@@ -301,6 +301,62 @@ class MetamonMaskedActor(amago.nets.actor_critic.Actor):
         return dist_params
 
 
+@gin.configurable
+class MetamonMaskedResidualActor(amago.nets.actor_critic.ResidualActor):
+    """ResidualActor with optional masking of illegal actions in logits.
+
+    Mirrors `MetamonMaskedActor` but for AMAGO's ResidualActor head.
+    """
+
+    def __init__(
+        self,
+        state_dim: int,
+        action_dim: int,
+        discrete: bool,
+        gammas: torch.Tensor,
+        feature_dim: int = 256,
+        residual_ff_dim: int = 512,
+        residual_blocks: int = 2,
+        activation: str = "leaky_relu",
+        normalization: str = "layer",
+        dropout_p: float = 0.0,
+        continuous_dist_type=None,
+        mask_illegal_actions: bool = True,
+    ):
+        super().__init__(
+            state_dim=state_dim,
+            action_dim=action_dim,
+            discrete=discrete,
+            gammas=gammas,
+            feature_dim=feature_dim,
+            residual_ff_dim=residual_ff_dim,
+            residual_blocks=residual_blocks,
+            activation=activation,
+            normalization=normalization,
+            dropout_p=dropout_p,
+            continuous_dist_type=continuous_dist_type,
+        )
+        self.mask_illegal_actions = mask_illegal_actions
+
+    def actor_network_forward(
+        self,
+        state: torch.Tensor,
+        log_dict: Optional[dict[str, Any]] = None,
+        straight_from_obs: Optional[dict[str, torch.Tensor]] = None,
+    ) -> torch.Tensor:
+        dist_params = super().actor_network_forward(
+            state, log_dict=log_dict, straight_from_obs=straight_from_obs
+        )
+        if self.mask_illegal_actions and straight_from_obs is not None:
+            Batch, Len, Gammas, N = dist_params.shape
+            mask = straight_from_obs["illegal_actions"]
+            no_options = mask.all(dim=-1, keepdim=True)
+            mask = torch.logical_and(mask, ~no_options)
+            mask = einops.repeat(mask, f"b l n -> b l {Gammas} n")
+            dist_params.masked_fill_(mask, -float("inf"))
+        return dist_params
+
+
 class PSLadderAMAGOWrapper(MetamonAMAGOWrapper):
     def __init__(self, env):
         assert isinstance(env, QueueOnLocalLadder)
@@ -528,3 +584,5 @@ class MetamonAMAGOExperiment(amago.Experiment):
             ~batch.obs["missing_action_mask"][:, :-1], "b l 1 -> b l c g 1", g=G, c=C
         )
         return pad_mask & missing_action_mask
+
+
