@@ -24,6 +24,8 @@ from metamon.interface import (
     DefaultObservationSpace,
     TeamPreviewObservationSpace,
     ExpandedObservationSpace,
+    get_observation_space,
+    get_reward_function,
     TokenizedObservationSpace,
     ActionSpace,
     DefaultActionSpace,
@@ -560,3 +562,24 @@ class Abra(PretrainedModel):
                 "amago.nets.transformer.FlashAttention.window_size": (32, 0),
             },
         )
+
+
+@pretrained_model()
+class Alakazam(LocalPretrainedModel):
+    def __init__(self):
+        super().__init__(
+            model_name="alakazam",
+            amago_ckpt_dir="/mnt/nfs_client/jake/metamon_scratchpad/gen9_training_runs/",
+            model_gin_config="alakazam.gin",
+            train_gin_config="alakazam.gin",
+            default_checkpoint=50,
+            action_space=DefaultActionSpace(),
+            observation_space=get_observation_space("OpponentMoveObservationSpace"),
+            reward_function=get_reward_function("AggressiveShapedReward"),
+            tokenizer=get_tokenizer("DefaultObservationSpace-v1"),
+        )
+
+    @property
+    def base_config(self):
+        return {"MetamonTstepEncoder.tokenizer": self.tokenizer}
+
