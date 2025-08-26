@@ -37,6 +37,17 @@ MetamonTstepEncoder.numerical_tokens = 6
 MetamonTstepEncoder.token_mask_aug = True
 MetamonTstepEncoder.dropout = .05
 
+# Perceiver variant (optional: switch tstep_encoder_type above)
+MetamonPerceiverTstepEncoder.extra_emb_dim = 18
+MetamonPerceiverTstepEncoder.d_model = 160
+MetamonPerceiverTstepEncoder.n_layers = 5
+MetamonPerceiverTstepEncoder.n_heads = 8
+MetamonPerceiverTstepEncoder.latent_tokens = 12
+MetamonPerceiverTstepEncoder.numerical_tokens = 6
+MetamonPerceiverTstepEncoder.token_mask_aug = True
+MetamonPerceiverTstepEncoder.dropout = .05
+MetamonPerceiverTstepEncoder.max_tokens_per_turn = 128
+
 # amago transformer
 traj_encoders.TformerTrajEncoder.n_layers = 9
 traj_encoders.TformerTrajEncoder.n_heads = 20

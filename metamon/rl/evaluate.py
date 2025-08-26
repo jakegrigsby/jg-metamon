@@ -333,6 +333,7 @@ def add_cli(parser):
             "paper_variety",
             "paper_replays",
             "modern_replays",
+            "new_modern_replays",
             "pokeagent_modern_replays",
         ],
         help="Team Set. See the README for more details.",

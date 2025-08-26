@@ -572,7 +572,7 @@ class Alakazam(LocalPretrainedModel):
             amago_ckpt_dir="/mnt/nfs_client/jake/metamon_scratchpad/gen9_training_runs/",
             model_gin_config="alakazam.gin",
             train_gin_config="alakazam.gin",
-            default_checkpoint=50,
+            default_checkpoint=54,
             action_space=DefaultActionSpace(),
             observation_space=get_observation_space("OpponentMoveObservationSpace"),
             reward_function=get_reward_function("AggressiveShapedReward"),

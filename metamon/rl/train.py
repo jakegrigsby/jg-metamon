@@ -227,7 +227,8 @@ def create_offline_rl_trainer(
     set for offline RL in metamon.
     """
     # configuration
-    config = {"MetamonTstepEncoder.tokenizer": obs_space.tokenizer}
+    config = {"MetamonTstepEncoder.tokenizer": obs_space.tokenizer,
+              "MetamonPerceiverTstepEncoder.tokenizer": obs_space.tokenizer}
     if manual_gin_overrides is not None:
         config.update(manual_gin_overrides)
     model_config_path = os.path.join(metamon.rl.MODEL_CONFIG_DIR, model_gin_config)
@@ -259,10 +260,11 @@ def create_offline_rl_trainer(
         # tstep_encoder_type = should be set in the gin file
         # traj_encoder_type = should be set in the gin file
         # agent_type = should be set in the gin file
-        val_timesteps_per_epoch=300,  # per actor
+        val_timesteps_per_epoch=0,  # per actor
         ## environment ##
         make_train_env=partial(make_placeholder_env, obs_space, action_space),
-        make_val_env=make_envs,
+        make_val_env=partial(make_placeholder_env, obs_space, action_space),
+        #make_val_env = make_envs,
         env_mode="async",
         async_env_mp_context=async_env_mp_context,
         parallel_actors=len(make_envs),

@@ -85,6 +85,7 @@ def get_metamon_teams(battle_format: str, set_name: str) -> TeamSet:
         "paper_replays",
         "paper_variety",
         "modern_replays",
+        "new_modern_replays",
         "pokeagent_modern_replays",
     }:
         raise ValueError(
@@ -398,6 +399,7 @@ class BattleAgainstBaseline(PokeEnvWrapper):
 
     Assumes the player and opponent are both sampling from the same set of team files.
     """
+    _INIT_RETRIES = 1000
 
     def __init__(
         self,

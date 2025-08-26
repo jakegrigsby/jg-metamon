@@ -17,7 +17,7 @@ from metamon.interface import (
     ActionSpace,
     UniversalAction,
 )
-from metamon.il.model import TransformerTurnEmbedding
+from metamon.il.model import TransformerTurnEmbedding, PerceiverTurnEmbedding
 from metamon.tokenizer import PokemonTokenizer, UNKNOWN_TOKEN
 from metamon.data import ParsedReplayDataset
 from metamon.env import (
@@ -463,6 +463,63 @@ class MetamonTstepEncoder(amago.nets.tstep_encoders.TstepEncoder):
         )
         return turn_emb
 
+
+@gin.configurable
+class MetamonPerceiverTstepEncoder(amago.nets.tstep_encoders.TstepEncoder):
+    """
+    Perceiver-style Token + numerical embedding for Metamon.
+
+    Uses latent cross-/self-attention with learnable positional embeddings.
+    """
+
+    def __init__(
+        self,
+        obs_space,
+        rl2_space,
+        tokenizer: PokemonTokenizer,
+        extra_emb_dim: int = 18,
+        d_model: int = 100,
+        n_layers: int = 3,
+        n_heads: int = 5,
+        latent_tokens: int = 8,
+        numerical_tokens: int = 6,
+        token_mask_aug: bool = False,
+        dropout: float = 0.05,
+        max_tokens_per_turn: int = 128,
+    ):
+        super().__init__(obs_space=obs_space, rl2_space=rl2_space)
+        self.token_mask_aug = token_mask_aug
+        self.extra_emb = nn.Linear(rl2_space.shape[-1], extra_emb_dim)
+        base_numerical_features = obs_space["numbers"].shape[0]
+        base_text_features = obs_space["text_tokens"].shape[0]
+        self.turn_embedding = PerceiverTurnEmbedding(
+            tokenizer=tokenizer,
+            token_embedding_dim=d_model,
+            text_features=base_text_features,
+            numerical_features=base_numerical_features + extra_emb_dim,
+            numerical_tokens=numerical_tokens,
+            latent_tokens=latent_tokens,
+            d_model=d_model,
+            n_heads=n_heads,
+            n_layers=n_layers,
+            dropout=dropout,
+            max_tokens_per_turn=max_tokens_per_turn,
+        )
+
+    @property
+    def emb_dim(self):
+        return self.turn_embedding.output_dim
+
+    @torch.compile
+    def inner_forward(self, obs, rl2s, log_dict=None):
+        if self.training and self.token_mask_aug:
+            obs["text_tokens"] = unknown_token_mask(obs["text_tokens"])
+        extras = F.leaky_relu(self.extra_emb(symlog(rl2s)))
+        numerical = torch.cat((obs["numbers"], extras), dim=-1)
+        turn_emb = self.turn_embedding(
+            token_inputs=obs["text_tokens"], numerical_inputs=numerical
+        )
+        return turn_emb
 
 class MetamonAMAGODataset(RLDataset):
     """A wrapper around the ParsedReplayDataset that converts to an AMAGO RLDataset.

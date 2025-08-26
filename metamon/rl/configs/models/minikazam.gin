@@ -1,0 +1,43 @@
+import amago.nets.actor_critic
+import amago.nets.traj_encoders
+import amago.agent
+import amago.experiment
+
+MetamonAMAGOExperiment.agent_type = @agent.Agent
+MetamonAMAGOExperiment.tstep_encoder_type = @MetamonPerceiverTstepEncoder
+MetamonAMAGOExperiment.traj_encoder_type = @traj_encoders.GRUTrajEncoder
+MetamonAMAGOExperiment.max_seq_len = 64
+
+# actor
+Agent.actor_type = @MetamonMaskedActor
+Agent.pass_obs_keys_to_actor = ["illegal_actions"]
+MetamonMaskedActor.activation = "leaky_relu"
+MetamonMaskedActor.n_layers = 2
+MetamonMaskedActor.d_hidden = 256
+
+# critic
+Agent.critic_type = @actor_critic.NCritics
+actor_critic.NCritics.activation = "leaky_relu"
+actor_critic.NCritics.n_layers = 2
+actor_critic.NCritics.d_hidden = 256
+Agent.popart = True
+Agent.num_critics = 4
+
+# local metamon architectures (Perceiver mini)
+MetamonPerceiverTstepEncoder.extra_emb_dim = 12
+MetamonPerceiverTstepEncoder.d_model = 64
+MetamonPerceiverTstepEncoder.n_layers = 3
+MetamonPerceiverTstepEncoder.n_heads = 4
+MetamonPerceiverTstepEncoder.latent_tokens = 5
+MetamonPerceiverTstepEncoder.numerical_tokens = 3
+MetamonPerceiverTstepEncoder.token_mask_aug = False
+MetamonPerceiverTstepEncoder.dropout = .05
+MetamonPerceiverTstepEncoder.max_tokens_per_turn = 64
+
+# rnn
+traj_encoders.GRUTrajEncoder.n_layers = 2
+traj_encoders.GRUTrajEncoder.d_hidden = 400
+traj_encoders.GRUTrajEncoder.d_output = 300
+traj_encoders.GRUTrajEncoder.norm = "layer"
+
+

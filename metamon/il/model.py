@@ -119,6 +119,95 @@ class FixedPosEmb(nn.Module):
         return emb
 
 
+class LearnablePosEmb(nn.Module):
+    def __init__(self, max_len: int, d_model: int):
+        super().__init__()
+        self.pos_emb = nn.Embedding(max_len, d_model)
+        self.max_len = max_len
+
+    def forward(self, pos_idxs: torch.LongTensor) -> torch.Tensor:
+        # pos_idxs: (B, L)
+        return self.pos_emb(pos_idxs.clamp_min(0).clamp_max(self.max_len - 1))
+
+
+class CrossAttentionBlock(nn.Module):
+    def __init__(self, d_model: int, n_heads: int, dropout: float):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(
+            embed_dim=d_model, num_heads=n_heads, dropout=dropout, batch_first=True
+        )
+        self.norm_q = nn.LayerNorm(d_model)
+        self.norm_kv = nn.LayerNorm(d_model)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, d_model * 4),
+            nn.SiLU(),
+            nn.Linear(d_model * 4, d_model),
+            nn.Dropout(dropout),
+        )
+        self.norm_ff = nn.LayerNorm(d_model)
+
+    def forward(self, q: torch.Tensor, kv: torch.Tensor) -> torch.Tensor:
+        # q: (B, N_latent, D), kv: (B, L, D)
+        q_norm = self.norm_q(q)
+        kv_norm = self.norm_kv(kv)
+        attn_out, _ = self.attn(query=q_norm, key=kv_norm, value=kv_norm, need_weights=False)
+        q = q + attn_out
+        q = q + self.ff(self.norm_ff(q))
+        return q
+
+
+class SelfAttentionBlock(nn.Module):
+    def __init__(self, d_model: int, n_heads: int, dropout: float):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(
+            embed_dim=d_model, num_heads=n_heads, dropout=dropout, batch_first=True
+        )
+        self.norm_attn = nn.LayerNorm(d_model)
+        self.norm_ff = nn.LayerNorm(d_model)
+        self.ff = nn.Sequential(
+            nn.Linear(d_model, d_model * 4),
+            nn.SiLU(),
+            nn.Linear(d_model * 4, d_model),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x_norm = self.norm_attn(x)
+        attn_out, _ = self.attn(query=x_norm, key=x_norm, value=x_norm, need_weights=False)
+        x = x + attn_out
+        x = x + self.ff(self.norm_ff(x))
+        return x
+
+
+class PerceiverEncoder(nn.Module):
+    def __init__(
+        self,
+        latent_tokens: int,
+        d_model: int,
+        n_heads: int,
+        n_layers: int,
+        dropout: float,
+    ):
+        super().__init__()
+        self.latents = nn.Parameter(torch.randn(latent_tokens, d_model) * 0.02)
+        # Alternate Cross -> Self per layer
+        self.cross_blocks = nn.ModuleList(
+            [CrossAttentionBlock(d_model=d_model, n_heads=n_heads, dropout=dropout) for _ in range(n_layers)]
+        )
+        self.self_blocks = nn.ModuleList(
+            [SelfAttentionBlock(d_model=d_model, n_heads=n_heads, dropout=dropout) for _ in range(n_layers)]
+        )
+        self.output_dim = latent_tokens * d_model
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, L, D)
+        B, L, D = x.shape
+        latents = self.latents.unsqueeze(0).expand(B, -1, -1)
+        for cross, self_attn in zip(self.cross_blocks, self.self_blocks):
+            latents = cross(latents, x)
+            latents = self_attn(latents)
+        return rearrange(latents, "b n d -> b 1 (n d)")
+
 class TimestepTransformer(nn.Module):
     """
     Take the multimodal sequence, add on a few blank ("scratch") tokens
@@ -302,6 +391,62 @@ class FFTurnEmbedding(TurnEmbedding):
         emb = self.norm(self.merge3(emb))
         return emb
 
+
+@gin.configurable
+class PerceiverTurnEmbedding(TurnEmbedding):
+    def __init__(
+        self,
+        tokenizer: PokemonTokenizer,
+        token_embedding_dim: int,
+        text_features: int,
+        numerical_features: int,
+        numerical_tokens: int = gin.REQUIRED,
+        latent_tokens: int = gin.REQUIRED,
+        d_model: int = gin.REQUIRED,
+        n_heads: int = gin.REQUIRED,
+        n_layers: int = gin.REQUIRED,
+        dropout: float = gin.REQUIRED,
+        max_tokens_per_turn: int = 128,
+    ):
+        super().__init__(
+            tokenizer,
+            token_embedding_dim=token_embedding_dim,
+            text_features=text_features,
+            numerical_features=numerical_features,
+        )
+        self.learned_pos = LearnablePosEmb(max_len=max_tokens_per_turn, d_model=d_model)
+        self.perceiver = PerceiverEncoder(
+            latent_tokens=latent_tokens,
+            d_model=d_model,
+            n_heads=n_heads,
+            n_layers=n_layers,
+            dropout=dropout,
+        )
+        self.multimodal_fuse = MultiModalEmbedding(
+            token_emb_dim=self.token_embedding.output_dim,
+            numerical_d_inp=self.numerical_features,
+            output_dim=d_model,
+            numerical_tokens=numerical_tokens,
+            dropout=dropout,
+        )
+
+    @property
+    def output_dim(self):
+        return self.perceiver.output_dim
+
+    def forward(self, token_inputs, numerical_inputs):
+        # token_inputs: (B, Global_L, text_features)
+        token_emb = self.token_embedding(token_inputs)
+        seq = self.multimodal_fuse(token_emb, numerical_features=numerical_inputs)
+        # seq: (B, Global_L, Local_L, D)
+        B, Global_L, Local_L, D = seq.shape
+        seq = rearrange(seq, "b l1 l2 d -> (b l1) l2 d")
+        L = seq.shape[1]
+        pos = torch.arange(0, L, device=seq.device).long().unsqueeze(0).expand(seq.shape[0], -1)
+        seq = seq + self.learned_pos(pos)
+        latents = self.perceiver(seq)  # (B*Global_L, 1, latent_tokens*d)
+        latents = rearrange(latents, "(b l1) 1 d -> b l1 d", b=B, l1=Global_L)
+        return latents
 
 @gin.configurable
 class GRUModel(MetamonILModel):
